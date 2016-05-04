@@ -64,3 +64,13 @@ target/
 # Sublime
 *.sublime-project
 *.sublime-workspace
+
+# C++
+*.in
+*.out
+*.so
+*.a
+*.plist
+*.gch
+*.pch
+*.o
