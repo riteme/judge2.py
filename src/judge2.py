@@ -8,6 +8,7 @@ import os
 import sys
 import time
 
+import imp
 import threading
 
 
@@ -115,9 +116,66 @@ class MemoryWatcher(object):
     def reset(self):
         self.max = 0.0
 
-if __name__ == "__main__":
-    t = Timer()
-    t.restart()
 
-    time.sleep(0.5222)
-    print(t.tick())
+class Checker(object):
+    """Respresent a checker"""
+    def __init__(self, path, checker_name="checker"):
+        super(Checker, self).__init__()
+        self.path = path
+        file, pathname, description = imp.find_module(
+            checker_name,
+            path = [os.path.abspath(path)]
+        )
+
+        if file is None:
+            raise ImportError("No checker found")
+
+        try:
+            self._checker = imp.load_module(
+                checker_name,
+                file, pathname, description
+            )
+        except Exception as e:
+            raise e
+
+    def check(self, testcase):
+        checker = self._checker.Checker(testcase)
+
+        return min(checker.check())
+
+
+class Testcase(object):
+    """Store states of a testcase's judgement"""
+    def __init__(self):
+        super(Testcase, self).__init__()
+        
+        self.id = 0
+        self.name = ""
+        self.compiler = None
+        self.time = 0.0
+        self.time_limit = 0.0
+        self.memory = 0.0
+        self.memory_limit = 0.0
+        self.return_code = 0
+        self.source = ""
+        self.source_extension = ""
+        self.standard_input = ""
+        self.standard_output = ""
+        self.user_output = ""
+        self.score = 10
+
+
+# Final status of judgement
+ACCEPTED = 0
+TIME_LIMIT_EXCEEDED = 1
+MEMORY_LIMIT_EXCEEDED = 2
+RUNTIME_ERROR = 3
+OUTPUT_LIMIT_EXCEEDED = 4
+ACCEPTABLE = 5
+WRONG_ANSWER = 6
+JUDGEMENT_ERROR = 7
+INTERNAL_ERROR = -1
+
+if __name__ == "__main__":
+    c = Checker("test")
+    print(c.check(Testcase))
