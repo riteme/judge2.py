@@ -144,6 +144,33 @@ class Checker(object):
         return min(checker.check())
 
 
+class Sandbox(object):
+    """Sandbox is designed for safety"""
+
+    SANDBOX_SOURCE = """
+    import os
+
+    os.chroot("{location}")
+    os.system("{target}")
+    """
+
+    def __init__(self, location="/tmp/judge", entrance="exec.py"):
+        super(Sandbox, self).__init__()
+        self.location = os.path.abspath(location)
+        
+        if not os.path.exist(self.location):
+            os.mkdir(self.location)
+
+        self.entrance = os.path.join(self.location, entrance)
+        with open(self.entrance) as f:
+            f.write(
+                Sandbox.SANDBOX_SOURCE.format(
+                    location = self.location,
+                    target = "./{}".format(entrance)
+                )
+            )
+
+
 class Testcase(object):
     """Store states of a testcase's judgement"""
     def __init__(self):
@@ -158,6 +185,7 @@ class Testcase(object):
         self.memory_limit = 0.0
         self.return_code = 0
         self.source = ""
+        self.compiled = ""
         self.source_extension = ""
         self.standard_input = ""
         self.standard_output = ""
