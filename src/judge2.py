@@ -9,7 +9,9 @@ import sys
 import time
 
 import imp
+import shutil
 import threading
+import subprocess
 
 
 def info(message):
@@ -24,7 +26,7 @@ def error(message):
 try:
     import psutil
 except:
-    warning("psutil not installed. Memory states will not be watched.")
+    warning("psutil is not installed. Memory states will not be watched.")
 
 
 class Compiler(object):
@@ -80,8 +82,9 @@ class MemoryWatcher(object):
     def _main(self):
         try:
             proc = psutil.Process(self.pid)
-        except:
-            warning("Memory watcher will not work.")
+        except Exception as e:
+            warning("Memory watcher will not work. Maybe the program has already exited.")
+            warning(str(e))
             return
 
         while self._flag:
@@ -111,7 +114,7 @@ class MemoryWatcher(object):
             self._thread.join()
 
     def get_history_max(self):
-        return self.max
+        return self.max / (1024 ** 2)
 
     def reset(self):
         self.max = 0.0
@@ -144,31 +147,17 @@ class Checker(object):
         return min(checker.check())
 
 
-class Sandbox(object):
-    """Sandbox is designed for safety"""
-
-    SANDBOX_SOURCE = """
-    import os
-
-    os.chroot("{location}")
-    os.system("{target}")
-    """
-
-    def __init__(self, location="/tmp/judge", entrance="exec.py"):
-        super(Sandbox, self).__init__()
-        self.location = os.path.abspath(location)
-        
-        if not os.path.exist(self.location):
-            os.mkdir(self.location)
-
-        self.entrance = os.path.join(self.location, entrance)
-        with open(self.entrance) as f:
-            f.write(
-                Sandbox.SANDBOX_SOURCE.format(
-                    location = self.location,
-                    target = "./{}".format(entrance)
-                )
-            )
+# Final status of judgement
+ACCEPTED = 0
+TIME_LIMIT_EXCEEDED = 1
+MEMORY_LIMIT_EXCEEDED = 2
+RUNTIME_ERROR = 3
+OUTPUT_LIMIT_EXCEEDED = 4
+ACCEPTABLE = 5
+WRONG_ANSWER = 6
+JUDGEMENT_ERROR = 7
+INTERNAL_ERROR = -1
+UNKNOWN = -2
 
 
 class Testcase(object):
@@ -183,27 +172,112 @@ class Testcase(object):
         self.time_limit = 0.0
         self.memory = 0.0
         self.memory_limit = 0.0
-        self.return_code = 0
+        self.returncode = 0
         self.source = ""
         self.compiled = ""
         self.source_extension = ""
+        self.input_filename = ""
+        self.output_filename = ""
         self.standard_input = ""
         self.standard_output = ""
         self.user_output = ""
         self.score = 10
+        self.status = UNKNOWN
+        self.message = ""
 
 
-# Final status of judgement
-ACCEPTED = 0
-TIME_LIMIT_EXCEEDED = 1
-MEMORY_LIMIT_EXCEEDED = 2
-RUNTIME_ERROR = 3
-OUTPUT_LIMIT_EXCEEDED = 4
-ACCEPTABLE = 5
-WRONG_ANSWER = 6
-JUDGEMENT_ERROR = 7
-INTERNAL_ERROR = -1
+class Judger(object):
+    """The core part of a single judgement"""
+    def __init__(self, testcase,
+                       timer,
+                       memory_watcher,
+                       checker
+                ):
+        super(Judger, self).__init__()
+        self.testcase = testcase
+        self.timer = timer
+        self.memory_watcher = memory_watcher
+        self.checker = checker
+
+    def judge(self):
+        try:
+            # Copy input data
+            shutil.copy2(
+                self.testcase.standard_input,
+                self.testcase.input_filename
+            )
+
+            # Update output file
+            self.testcase.user_output = self.testcase.output_filename
+
+            # Preparations
+            self.memory_watcher.reset()
+
+            # Run it
+            proc = subprocess.Popen(
+                ["./{}".format(self.testcase.compiled)]
+            )
+
+            # Start memory watcher
+            self.memory_watcher.start(proc.pid)
+
+            # Start timer
+            self.timer.restart()
+
+            try:
+                # Wait for exit
+                proc.wait(timeout = self.testcase.time_limit)
+            except subprocess.TimeoutExpired:
+                pass
+
+            # Get running time
+            self.testcase.time = self.timer.tick()
+
+            # Get memory usage
+            self.memory_watcher.stop()
+            self.testcase.memory = self.memory_watcher.get_history_max()
+
+            # Get returncode
+            self.testcase.returncode = proc.returncode
+
+            # Check if the program exit with no error
+            if self.testcase.time > self.testcase.time_limit:
+                self.testcase.status = TIME_LIMIT_EXCEEDED
+            elif self.testcase.memory > self.testcase.memory_limit:
+                self.testcase.status = MEMORY_LIMIT_EXCEEDED
+            elif self.testcase.returncode != 0:
+                self.testcase.status = RUNTIME_ERROR
+
+            # Check the answer
+            if self.testcase.status == UNKNOWN:
+                self.testcase.status = self.checker.check(
+                    self.testcase
+                )
+
+        except Exception as e:
+            self.testcase.status = INTERNAL_ERROR
+            raise e
+
 
 if __name__ == "__main__":
-    c = Checker("test")
-    print(c.check(Testcase))
+    t = Testcase()
+    t.time_limit = 1.0
+    t.memory_limit = 64.0
+    t.source = "a/a.cpp"
+    t.compiled = "exec"
+    t.input_filename = "a.in"
+    t.output_filename = "a.out"
+    t.standard_input = "a/a.in"
+    t.standard_output = "a/a.out"
+    t.score = 100
+
+    compiler = Compiler("g++", args = ["-static"])
+    compiler.compile("a/a.cpp", output = "exec")
+
+    timer = Timer()
+    memory_watchdog = MemoryWatcher()
+    checker = Checker("a")
+    judger = Judger(t, timer, memory_watchdog, checker)
+    judger.judge()
+
+    print(t.time, t.memory, t.returncode, t.status, t.message)
